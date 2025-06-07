@@ -33,7 +33,7 @@ npm install
 ### 3. Set Up MongoDB
 
 * Make sure MongoDB is running locally or use a cloud provider (e.g. MongoDB Atlas).
-* Update your connection string in `index.js` or `.env` file.
+* Update your connection string in `db.js` or `.env` file.
 
 ### 4. Start the Server
 
