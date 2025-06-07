@@ -20,7 +20,7 @@ It allows managing Users, Products, and Feedbacks with relationships and basic o
 ### 1. Clone the Repository
 
 ```bash
-git clone [https://github.com/your-username/your-repo-name.git](https://github.com/AhlemBenmed/FeedbackGraphQL.git)
+git clone https://github.com/AhlemBenmed/FeedbackGraphQL.git
 cd FeedbackGraphQL
 ````
 
