@@ -1,4 +1,3 @@
-````markdown
 # 📦 GraphQL API for Products, Users, and Feedback
 
 This is a simple GraphQL API built using **Apollo Server** and **MongoDB** with Mongoose.  
