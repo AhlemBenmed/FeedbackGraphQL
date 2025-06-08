@@ -1,7 +1,9 @@
 const { gql } = require('apollo-server');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const { User, Product, Feedback } = require('./models');
+const { secret } = require('./auth');
 
-// Helper to recalculate and update the cached average rating
 const updateAverageRating = async (productId) => {
   const feedbacks = await Feedback.find({ productId });
   const avg =
@@ -17,6 +19,7 @@ const typeDefs = gql`
     id: ID!
     name: String!
     email: String!
+    role: String!
     feedbacks: [Feedback]
   }
 
@@ -37,6 +40,11 @@ const typeDefs = gql`
     date: String
   }
 
+  type AuthPayload {
+    token: String!
+    user: User!
+  }
+
   type Query {
     products: [Product]
     product(id: ID!): Product
@@ -46,68 +54,52 @@ const typeDefs = gql`
     feedbacksByUser(userId: ID!): [Feedback]
     users: [User]
     user(id: ID!): User
-
-    feedbackNumberByProduct(productId: ID!):Int
-    feedbackNumberByUser(userId: ID!):Int
-    productByRating(rating:Float!):[Product]
-    bestProducts:[Product]
+    productByRating(rating: Float!): [Product]
+    bestProducts: [Product]
   }
 
   type Mutation {
     register(name: String!, email: String!, password: String!,role: String!): AuthPayload
     login(email: String!, password: String!): AuthPayload
-    # Create
-    addProduct(name: String!, description: String): Product
-    addFeedback(userId: ID!, productId: ID!, rating: Int!, comment: String): Feedback
 
-    # Update
-    updateUser(id: ID!, name: String, email: String): User
+    addProduct(name: String!, description: String): Product
+    addFeedback(productId: ID!, rating: Int!, comment: String): Feedback
+
     updateProduct(id: ID!, name: String, description: String): Product
     updateFeedback(id: ID!, rating: Int, comment: String): Feedback
-
-    # Delete by ID
-    deleteUser(id: ID!): Boolean
+    updateUser(id: ID!, name: String, email: String, role: String): User
+    
     deleteProduct(id: ID!): Boolean
     deleteFeedback(id: ID!): Boolean
-
-    # Delete all
-    deleteAllUsers: Boolean
-    deleteAllProducts: Boolean
-    deleteAllFeedbacks: Boolean
+    deleteUser(id: ID!): Boolean
   }
 `;
 
 const resolvers = {
   Query: {
-    users: async () => await User.find(),
+    users: async (_, __, { user }) => {
+      if (!user || user.role !== 'admin') throw new Error('Unauthorized Only admins can view users');
+      return await User.find();
+    },
     user: async (_, { id }) => await User.findById(id),
-     products: async () => {
-    const products = await Product.find();
-
-    for (const product of products) {
-      await updateAverageRating(product._id);
-    }
-
-    return await Product.find(); // Return updated products
-  },
+    products: async () => {
+      const products = await Product.find();
+      for (const product of products) {
+        await updateAverageRating(product._id);
+      }
+      return await Product.find();
+    },
     product: async (_, { id }) => await Product.findById(id),
     feedbacks: async () => await Feedback.find(),
     feedback: async (_, { id }) => await Feedback.findById(id),
     feedbacksByUser: async (_, { userId }) => await Feedback.find({ userId }),
     feedbacksByProduct: async (_, { productId }) => await Feedback.find({ productId }),
-     productByRating: async (_, { rating }) => {
-      const products = await Product.find({ averageRating: { $gte: rating - 0.01, $lte: rating + 0.01 } });
-      return products;
-    },
-    
-    bestProducts: async () => {
-      const products = await Product.find().sort({ averageRating: -1 });
-      return products;
-    },
+    productByRating: async (_, { rating }) =>
+      await Product.find({ averageRating: { $gte: rating - 0.01, $lte: rating + 0.01 } }),
+    bestProducts: async () => await Product.find().sort({ averageRating: -1 }),
   },
 
   Mutation: {
-     // login
     register: async (_, { name, email, password, role = 'user' }) => {
   const existing = await User.findOne({ email });
   if (existing) throw new Error("Email already registered");
@@ -122,7 +114,7 @@ const resolvers = {
     user
   };
 },
- // login
+
     login: async (_, { email, password }) => {
       const user = await User.findOne({ email });
       if (!user || !(await bcrypt.compare(password, user.password))) {
@@ -131,79 +123,78 @@ const resolvers = {
       const token = jwt.sign({ id: user._id, role: user.role }, secret, { expiresIn: '1d' });
       return { token, user };
     },
-    addProduct: async (_, { name, description }) => {
-      const product = new Product({ name, description, averageRating: 0 });
+
+    addProduct: async (_, { name, description }, { user }) => {
+      if (!user) throw new Error('Login required ');
+      if (user.role !== 'admin') throw new Error('Only admins can add products');
+      const product = new Product({ name, description });
       await product.save();
       return product;
     },
 
-    addFeedback: async (_, { userId, productId, rating, comment }) => {
-      const user = await User.findById(userId);
+    addFeedback: async (_, { productId, rating, comment }, { user }) => {
+      if (!user) throw new Error('Login required');
+      if (user.role == 'admin') throw new Error('Only users can add feedback');
+      if (rating < 1 || rating > 5) throw new Error('Rating must be between 1 and 5');
       const product = await Product.findById(productId);
-      if (!user || !product) throw new Error("User or Product not found");
-
+      if (!product) throw new Error('Product not found');
       const feedback = new Feedback({
-        userId,
+        userId: user._id,
         productId,
         rating,
         comment,
-        date: new Date().toISOString(),
+        date: new Date(),
       });
       await feedback.save();
       await updateAverageRating(productId);
       return feedback;
     },
 
-    // Update
-    updateUser: async (_, { id, name, email }) => {
-      return await User.findByIdAndUpdate(id, { name, email }, { new: true });
-    },
-
-    updateProduct: async (_, { id, name, description }) => {
+    updateProduct: async (_, { id, name, description }, { user }) => {
+      if (!user || user.role !== 'admin') throw new Error('Unauthorized');
       return await Product.findByIdAndUpdate(id, { name, description }, { new: true });
     },
 
-    updateFeedback: async (_, { id, rating, comment }) => {
-      const feedback = await Feedback.findByIdAndUpdate(id, { rating, comment }, { new: true });
-      if (feedback) await updateAverageRating(feedback.productId);
+    updateFeedback: async (_, { id, rating, comment }, { user }) => {
+      const feedback = await Feedback.findById(id);
+      if (!feedback || !user || feedback.userId.toString() !== user._id.toString())
+        throw new Error('Unauthorized');
+      feedback.rating = rating ?? feedback.rating;
+      feedback.comment = comment ?? feedback.comment;
+      await feedback.save();
+      await updateAverageRating(feedback.productId);
       return feedback;
     },
+    updateUser: async (_, { id, name, email, role }, { user }) => {
+      if (!user || user.role !== 'admin') throw new Error('Unauthorized');
+      const updatedUser = await User.findByIdAndUpdate(
+        id,
+        { name, email, role },
+        { new: true }
+      );
+      if (!updatedUser) throw new Error('User not found');
+      return updatedUser;
+    }
+,
 
-    // Delete by ID
-    deleteUser: async (_, { id }) => {
-      const result = await User.findByIdAndDelete(id);
-      return !!result;
-    },
-
-    deleteProduct: async (_, { id }) => {
-      const result = await Product.findByIdAndDelete(id);
-      return !!result;
-    },
-
-    deleteFeedback: async (_, { id }) => {
-      const feedback = await Feedback.findByIdAndDelete(id);
-      if (feedback) await updateAverageRating(feedback.productId);
-      return !!feedback;
-    },
-
-    // Delete All
-    deleteAllUsers: async () => {
-      await User.deleteMany();
+    deleteProduct: async (_, { id }, { user }) => {
+      if (!user || user.role !== 'admin') throw new Error('Unauthorized');
+      await Product.findByIdAndDelete(id);
       return true;
     },
 
-    deleteAllProducts: async () => {
-      await Product.deleteMany();
+    deleteFeedback: async (_, { id }, { user }) => {
+      const feedback = await Feedback.findById(id);
+      if (!feedback || (!user || (user.role !== 'admin' && feedback.userId.toString() !== user._id.toString())))
+        throw new Error('Unauthorized');
+      await Feedback.findByIdAndDelete(id);
+      await updateAverageRating(feedback.productId);
       return true;
     },
-
-    deleteAllFeedbacks: async () => {
-      await Feedback.deleteMany();
-      // Reset all product ratings
-      const products = await Product.find();
-      for (const product of products) {
-        await updateAverageRating(product._id);
-      }
+    deleteUser: async (_, { id }, { user }) => {
+      if (!user || user.role !== 'admin') throw new Error('Unauthorized');
+      const deletedUser = await User.findByIdAndDelete(id);
+      if (!deletedUser) throw new Error('User not found');
       return true;
     },
   },
@@ -216,10 +207,7 @@ const resolvers = {
   Feedback: {
     user: async (feedback) => await User.findById(feedback.userId),
     product: async (feedback) => await Product.findById(feedback.productId),
-    date: (feedback) => {
-      const d = new Date(feedback.date);
-      return d.toLocaleDateString('en-GB').replace(/\//g, '-');
-    },
+    date: (feedback) => new Date(feedback.date).toLocaleDateString('en-GB').replace(/\//g, '-'),
   },
 };
 
