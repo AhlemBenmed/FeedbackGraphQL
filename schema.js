@@ -54,8 +54,9 @@ const typeDefs = gql`
   }
 
   type Mutation {
+    register(name: String!, email: String!, password: String!,role: String!): AuthPayload
+    login(email: String!, password: String!): AuthPayload
     # Create
-    addUser(name: String!, email: String!): User
     addProduct(name: String!, description: String): Product
     addFeedback(userId: ID!, productId: ID!, rating: Int!, comment: String): Feedback
 
@@ -106,13 +107,30 @@ const resolvers = {
   },
 
   Mutation: {
-    // Create
-    addUser: async (_, { name, email }) => {
-      const user = new User({ name, email });
-      await user.save();
-      return user;
-    },
+     // login
+    register: async (_, { name, email, password, role = 'user' }) => {
+  const existing = await User.findOne({ email });
+  if (existing) throw new Error("Email already registered");
 
+  const hashed = await bcrypt.hash(password, 10);
+  const user = new User({ name, email, password: hashed, role });
+  await user.save();
+
+  const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET);
+  return {
+    token,
+    user
+  };
+},
+ // login
+    login: async (_, { email, password }) => {
+      const user = await User.findOne({ email });
+      if (!user || !(await bcrypt.compare(password, user.password))) {
+        throw new Error('Invalid credentials');
+      }
+      const token = jwt.sign({ id: user._id, role: user.role }, secret, { expiresIn: '1d' });
+      return { token, user };
+    },
     addProduct: async (_, { name, description }) => {
       const product = new Product({ name, description, averageRating: 0 });
       await product.save();
