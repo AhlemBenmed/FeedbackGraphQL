@@ -1,16 +1,25 @@
 const { gql } = require('apollo-server');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 const { User, Product, Feedback } = require('./models');
 const { secret } = require('./auth');
 
+// Email transporter (configure with real credentials)
+const transporter = nodemailer.createTransport({
+  service: 'Gmail',
+  auth: {
+    user: 'codeninjas.tekup@gmail.com',
+    pass: 'hvio qmny qjrt fzan'
+  }
+});
+
 const updateAverageRating = async (productId) => {
   const feedbacks = await Feedback.find({ productId });
-  const avg =
-    feedbacks.length === 0
-      ? 0
-      : feedbacks.reduce((sum, f) => sum + f.rating, 0) / feedbacks.length;
-
+  const avg = feedbacks.length === 0
+    ? 0
+    : feedbacks.reduce((sum, f) => sum + f.rating, 0) / feedbacks.length;
   await Product.findByIdAndUpdate(productId, { averageRating: avg });
 };
 
@@ -20,6 +29,7 @@ const typeDefs = gql`
     name: String!
     email: String!
     role: String!
+    verified: Boolean
     feedbacks: [Feedback]
   }
 
@@ -56,11 +66,16 @@ const typeDefs = gql`
     user(id: ID!): User
     productByRating(rating: Float!): [Product]
     bestProducts: [Product]
+    me: User
   }
 
   type Mutation {
-    register(name: String!, email: String!, password: String!,role: String!): AuthPayload
+    register(name: String!, email: String!, password: String!, role: String!): AuthPayload
+    sendVerificationEmail(email: String!): String
+    verifyEmail(token: String!): String
     login(email: String!, password: String!): AuthPayload
+    requestPasswordReset(email: String!): String
+    resetPassword(token: String!, newPassword: String!): String
 
     addProduct(name: String!, description: String): Product
     addFeedback(productId: ID!, rating: Int!, comment: String): Feedback
@@ -68,7 +83,7 @@ const typeDefs = gql`
     updateProduct(id: ID!, name: String, description: String): Product
     updateFeedback(id: ID!, rating: Int, comment: String): Feedback
     updateUser(id: ID!, name: String, email: String, role: String): User
-    
+
     deleteProduct(id: ID!): Boolean
     deleteFeedback(id: ID!): Boolean
     deleteUser(id: ID!): Boolean
@@ -78,7 +93,7 @@ const typeDefs = gql`
 const resolvers = {
   Query: {
     users: async (_, __, { user }) => {
-      if (!user || user.role !== 'admin') throw new Error('Unauthorized Only admins can view users');
+      if (!user || user.role !== 'admin') throw new Error('Unauthorized');
       return await User.find();
     },
     user: async (_, { id }) => await User.findById(id),
@@ -97,49 +112,118 @@ const resolvers = {
     productByRating: async (_, { rating }) =>
       await Product.find({ averageRating: { $gte: rating - 0.01, $lte: rating + 0.01 } }),
     bestProducts: async () => await Product.find().sort({ averageRating: -1 }),
+    me: async (_, __, { user }) => {
+      if (!user) throw new Error('Unauthorized');
+      return await User.findById(user.id);
+    }
   },
 
   Mutation: {
-    register: async (_, { name, email, password, role = 'user' }) => {
-  const existing = await User.findOne({ email });
-  if (existing) throw new Error("Email already registered");
+    register: async (_, { name, email, password, role }) => {
+      const existing = await User.findOne({ email });
+      if (existing) throw new Error('Email already registered');
+      const hashed = await bcrypt.hash(password, 10);
+      const verificationToken = crypto.randomBytes(32).toString('hex');
 
-  const hashed = await bcrypt.hash(password, 10);
-  const user = new User({ name, email, password: hashed, role });
-  await user.save();
+      const user = new User({ name, email, password: hashed, role, verified: false, verificationToken });
+      await user.save();
 
-  const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET);
-  return {
-    token,
-    user
-  };
-},
+      // Call sendVerificationEmail after registration
+      await resolvers.Mutation.sendVerificationEmail(_, { email });
+
+      const token = jwt.sign({ id: user._id, role: user.role }, secret, { expiresIn: '1d' });
+      return { token, user };
+    },
+
+    sendVerificationEmail: async (_, { email }) => {
+      const user = await User.findOne({ email });
+      if (!user) return 'If the email exists, a verification email has been sent.';
+      if (user.verified) return 'Email is already verified.';
+      const verificationToken = user.verificationToken || crypto.randomBytes(32).toString('hex');
+      user.verificationToken = verificationToken;
+      await user.save();
+      await transporter.sendMail({
+        from: 'NeedYourFeedback <codeninjas.tekup@gmail.com>',
+        to: email,
+        subject: 'Verify your email',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: auto; border: 1px solid #eee; padding: 24px; border-radius: 8px;">
+            <h2 style="color: #4CAF50;">Welcome to Feedback App!</h2>
+            <p>Thank you for registering. Please verify your email by copying the token and pasting it in the app:</p>
+            <pre style="display: inline-block; background: #4CAF50; color: #fff; padding: 12px 24px; border-radius: 4px; font-size: 2em; margin: 16px 0;">${verificationToken}</pre>
+            <p style="color: #888; font-size: 0.9em;">If you did not request this, please ignore this email.</p>
+          </div>
+        `
+      });
+      return 'Verification email sent.';
+    },
+
+    verifyEmail: async (_, { token }) => {
+      const user = await User.findOne({ verificationToken: token });
+      if (!user) throw new Error('Invalid or expired token');
+      user.verified = true;
+      user.verificationToken = undefined;
+      await user.save();
+      return 'Email verified successfully.';
+    },
 
     login: async (_, { email, password }) => {
       const user = await User.findOne({ email });
       if (!user || !(await bcrypt.compare(password, user.password))) {
         throw new Error('Invalid credentials');
       }
+      if (!user.verified) throw new Error('Email not verified');
       const token = jwt.sign({ id: user._id, role: user.role }, secret, { expiresIn: '1d' });
       return { token, user };
     },
 
+    requestPasswordReset: async (_, { email }) => {
+      const user = await User.findOne({ email });
+      if (!user) return 'If the email exists, a password reset email has been sent.';
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      user.resetToken = resetToken;
+      user.resetTokenExpiry = Date.now() + 3600000; // 1 hour
+      await user.save();
+      await transporter.sendMail({
+        from: 'NeedYourFeedback <codeninjas.tekup@gmail.com>',
+        to: email,
+        subject: 'Reset your password',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: auto; border: 1px solid #eee; padding: 24px; border-radius: 8px;">
+            <h2 style="color: #2196F3;">Password Reset Request</h2>
+            <p>We received a request to reset your password. Copy the token to reset your password and paste this token in the app:</p>
+            <pre style="display: inline-block; background: #2196F3; color: #fff; padding: 12px 24px; border-radius: 4px; font-size: 2em; margin: 16px 0;">${resetToken}</pre>
+            <p style="color: #888; font-size: 0.9em;">If you did not request this, you can safely ignore this email.</p>
+          </div>
+        `
+      });
+      return 'Password reset email sent.';
+    },
+
+    resetPassword: async (_, { token, newPassword }) => {
+      const user = await User.findOne({ resetToken: token, resetTokenExpiry: { $gt: Date.now() } });
+      if (!user) throw new Error('Invalid or expired token');
+      user.password = await bcrypt.hash(newPassword, 10);
+      user.resetToken = undefined;
+      user.resetTokenExpiry = undefined;
+      await user.save();
+      return 'Password has been reset successfully.';
+    },
+
     addProduct: async (_, { name, description }, { user }) => {
-      if (!user) throw new Error('Login required ');
-      if (user.role !== 'admin') throw new Error('Only admins can add products');
+      if (!user || user.role !== 'admin') throw new Error('Unauthorized');
       const product = new Product({ name, description });
       await product.save();
       return product;
     },
 
     addFeedback: async (_, { productId, rating, comment }, { user }) => {
-      if (!user) throw new Error('Login required');
-      if (user.role == 'admin') throw new Error('Only users can add feedback');
-      if (rating < 1 || rating > 5) throw new Error('Rating must be between 1 and 5');
+      if (!user || user.role === 'admin') throw new Error('Unauthorized');
+      if (rating < 1 || rating > 5) throw new Error('Rating must be 1-5');
       const product = await Product.findById(productId);
       if (!product) throw new Error('Product not found');
       const feedback = new Feedback({
-        userId: user._id,
+        userId: user.id,
         productId,
         rating,
         comment,
@@ -157,25 +241,18 @@ const resolvers = {
 
     updateFeedback: async (_, { id, rating, comment }, { user }) => {
       const feedback = await Feedback.findById(id);
-      if (!feedback || !user || feedback.userId.toString() !== user._id.toString())
-        throw new Error('Unauthorized');
+      if (!feedback || feedback.userId.toString() !== user.id.toString()) throw new Error('Unauthorized');
       feedback.rating = rating ?? feedback.rating;
       feedback.comment = comment ?? feedback.comment;
       await feedback.save();
       await updateAverageRating(feedback.productId);
       return feedback;
     },
+
     updateUser: async (_, { id, name, email, role }, { user }) => {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
-      const updatedUser = await User.findByIdAndUpdate(
-        id,
-        { name, email, role },
-        { new: true }
-      );
-      if (!updatedUser) throw new Error('User not found');
-      return updatedUser;
-    }
-,
+      return await User.findByIdAndUpdate(id, { name, email, role }, { new: true });
+    },
 
     deleteProduct: async (_, { id }, { user }) => {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
@@ -185,18 +262,18 @@ const resolvers = {
 
     deleteFeedback: async (_, { id }, { user }) => {
       const feedback = await Feedback.findById(id);
-      if (!feedback || (!user || (user.role !== 'admin' && feedback.userId.toString() !== user._id.toString())))
+      if (!feedback || (user.role !== 'admin' && feedback.userId.toString() !== user.id.toString()))
         throw new Error('Unauthorized');
       await Feedback.findByIdAndDelete(id);
       await updateAverageRating(feedback.productId);
       return true;
     },
+
     deleteUser: async (_, { id }, { user }) => {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
-      const deletedUser = await User.findByIdAndDelete(id);
-      if (!deletedUser) throw new Error('User not found');
+      await User.findByIdAndDelete(id);
       return true;
-    },
+    }
   },
 
   Product: {
@@ -208,7 +285,7 @@ const resolvers = {
     user: async (feedback) => await User.findById(feedback.userId),
     product: async (feedback) => await Product.findById(feedback.productId),
     date: (feedback) => new Date(feedback.date).toLocaleDateString('en-GB').replace(/\//g, '-'),
-  },
+  }
 };
 
 module.exports = { typeDefs, resolvers };
