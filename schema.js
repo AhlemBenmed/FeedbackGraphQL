@@ -46,6 +46,11 @@ const typeDefs = gql`
     feedbacksByUser(userId: ID!): [Feedback]
     users: [User]
     user(id: ID!): User
+
+    feedbackNumberByProduct(productId: ID!):Int
+    feedbackNumberByUser(userId: ID!):Int
+    productByRating(rating:Float!):[Product]
+    bestProducts:[Product]
   }
 
   type Mutation {
@@ -75,12 +80,29 @@ const resolvers = {
   Query: {
     users: async () => await User.find(),
     user: async (_, { id }) => await User.findById(id),
-    products: async () => await Product.find(),
+     products: async () => {
+    const products = await Product.find();
+
+    for (const product of products) {
+      await updateAverageRating(product._id);
+    }
+
+    return await Product.find(); // Return updated products
+  },
     product: async (_, { id }) => await Product.findById(id),
     feedbacks: async () => await Feedback.find(),
     feedback: async (_, { id }) => await Feedback.findById(id),
     feedbacksByUser: async (_, { userId }) => await Feedback.find({ userId }),
     feedbacksByProduct: async (_, { productId }) => await Feedback.find({ productId }),
+     productByRating: async (_, { rating }) => {
+      const products = await Product.find({ averageRating: { $gte: rating - 0.01, $lte: rating + 0.01 } });
+      return products;
+    },
+    
+    bestProducts: async () => {
+      const products = await Product.find().sort({ averageRating: -1 });
+      return products;
+    },
   },
 
   Mutation: {
@@ -153,7 +175,7 @@ const resolvers = {
     },
 
     deleteAllProducts: async () => {
-      await Product.deleteMany();+
+      await Product.deleteMany();
       return true;
     },
 
