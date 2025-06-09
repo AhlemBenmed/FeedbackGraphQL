@@ -81,7 +81,7 @@ The GraphQL playground will be available at:
 
 ---
 ## 📊  Diagramme de classes
-![](./assets/diagram.png)
+![](Diagramme_de_classes.png)
 ---
 ## 🔍 GraphQL Schema Overview
 
