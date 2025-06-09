@@ -16,16 +16,18 @@ Mise en place d’un système de feedback basé sur une API GraphQL. Cette solut
 
 ## ✨ Features
 ### 🔐 Authentication
-- User registration with email verification
-- JWT token authentication
-- Password reset functionality
+- User registration with email verification (token sent by styled email)
+- JWT token authentication (now loaded from `.env`)
+- Password reset functionality (token sent by styled email)
 - Role-based authorization (Admin/User)
+- `.env` file for all secrets and credentials
 
 ### 📦 Products
-- Create, read, update,  delete products,get products by id ,get all products
+- Create, read, update, delete products, get products by id, get all products
 - Automatic average rating calculation
 - Filter products by rating
 - Get top-rated products
+- 🗑️ **Monthly cleanup:** Products with more than 3 feedbacks, all rated ≤1, are deleted automatically (via cron job)
 
 ### 💬 Feedback
 - Submit and manage product feedback (1-5 star ratings)
@@ -33,22 +35,26 @@ Mise en place d’un système de feedback basé sur une API GraphQL. Cette solut
 - feedback Number by user or product
 - Real-time rating updates
 
-
+### 📝 Audit Log
+- All important actions (e.g., product creation) can be logged in the `AuditLog` collection
+- (Optional) Query audit logs (admin only)
 
 ## 🛠️ Technical Stack
 - *Backend*: Node.js with Apollo Server
 - *Database*: MongoDB with Mongoose
 - *Authentication*: JWT with bcrypt password hashing
-- *Email Services*: Nodemailer with Gmail SMTP
+- *Email Services*: Nodemailer with Gmail SMTP (credentials in `.env`)
+- *Scheduling*: node-cron for monthly cleanup
+- *Environment*: dotenv for config
 
 ## 📚 API Documentation
 
 ### 📌 Authentication Flow
 
-1. *Register*: Creates user and sends verification email
+1. *Register*: Creates user and sends verification email (token in styled email)
 2. *Verify Email*: User verifies with token from email
 3. *Login*: Gets JWT token for authenticated requests
-4. *Password Reset*: Request email → Reset with token
+4. *Password Reset*: Request email → Reset with token (token in styled email)
 
 ## 🚀 Getting Started
 
@@ -57,7 +63,7 @@ Mise en place d’un système de feedback basé sur une API GraphQL. Cette solut
 ```bash
 git clone https://github.com/AhlemBenmed/FeedbackGraphQL.git
 cd FeedbackGraphQL
-````
+```
 
 ### 2. Install Dependencies
 
@@ -65,10 +71,24 @@ cd FeedbackGraphQL
 npm install
 ```
 
-### 3. Set Up MongoDB
+### 3. Set Up Environment Variables
 
-* Make sure MongoDB is running locally or use a cloud provider (e.g. MongoDB Atlas).
-* Update your connection string in `db.js` or `.env` file.
+Create a `.env` file at the root with:
+```env
+# ------------------------
+# 📬 Email Configuration (Gmail)
+# ------------------------
+EMAIL_USER=your_email@gmail.com
+EMAIL_PASS=your_email_password
+# ------------------------
+# 🔐 JWT Authentication
+# ------------------------
+JWT_SECRET=your_secret_key
+# ------------------------
+# 🛢️ MongoDB Connection
+# ------------------------
+MONGO_URI=your_mongodb_connection_string
+```
 
 ### 4. Start the Server
 
@@ -112,7 +132,12 @@ type Feedback {
   comment: String
   date: String
 }
-
+type AuditLog {
+  userId: User
+  action: String
+  details: String
+  timestamp: String
+}
 ```
 
 
@@ -200,15 +225,32 @@ query {
   }
 }
 ```
+*Get Your Profile:*
+```graphql
+query {
+  me {
+    id
+    name
+    email
+    role
+    verified
+  }
+}
+```
+*Query Audit Logs (Admin Only):*
+```graphql
+query {
+  auditLogs {
+    userId { id name }
+    action
+    details
+    timestamp
+  }
+}
+```
 
 ## ⚙️ Configuration
-Create .env file with:
-```env
-JWT_SECRET=your_secret_key
-MONGO_URI=mongodb://localhost:27017/feedbackdb
-EMAIL_USER=your_email@gmail.com
-EMAIL_PASS=your_email_password
-```
+See the `.env` example above for all required environment variables.
 
 ## 📧 Email Templates
 
@@ -222,21 +264,23 @@ EMAIL_PASS=your_email_password
 ```
 *Password Reset Email:*
 ```html
-
 <div style="font-family: Arial; max-width: 500px; margin: auto; border: 1px solid #eee; padding: 24px; border-radius: 8px;">
   <h2 style="color: #2196F3;">Password Reset Request</h2>
   <p>Use this token to reset your password:</p>
   <pre style="background: #2196F3; color: #fff; padding: 12px 24px; border-radius: 4px; font-size: 2em;">TOKEN</pre>
 </div>
 ```
+
 ## 🏗️ Project Structure
 ```
-src/
+FEEDBACK-GRAPHQL/
 ├── models.js
 ├── auth.js
 ├── db.js
 ├── schema.js
-└── index.js
+├── index.js
+├── .env
+├── README.md
 ```
 
 ## 🔒 Security
@@ -246,7 +290,7 @@ src/
 - Email verification required
 - Password reset token expiration (1 hour)
 - Role-based authorization checks
-
+- All secrets and credentials in `.env`
 
 ## 🧪 Testing
 
@@ -256,6 +300,7 @@ You can test the API using:
 * Postman (with GraphQL support)
 * Apollo Studio Playground
 * Access GraphQL Playground at `http://localhost:4000`
+
 ---
 
 ## 🧑‍💻 Author

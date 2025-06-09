@@ -1,17 +1,19 @@
+require('dotenv').config();
 const { gql } = require('apollo-server');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
-const { User, Product, Feedback } = require('./models');
+const cron = require('node-cron');
+const { User, Product, Feedback, AuditLog } = require('./models');
 const { secret } = require('./auth');
 
 // Email transporter (configure with real credentials)
 const transporter = nodemailer.createTransport({
   service: 'Gmail',
   auth: {
-    user: 'codeninjas.tekup@gmail.com',
-    pass: 'hvio qmny qjrt fzan'
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
   }
 });
 
@@ -214,6 +216,7 @@ const resolvers = {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
       const product = new Product({ name, description });
       await product.save();
+      // await logAudit(user, 'addProduct', `Added product: ${name}`);
       return product;
     },
 
@@ -287,5 +290,31 @@ const resolvers = {
     date: (feedback) => new Date(feedback.date).toLocaleDateString('en-GB').replace(/\//g, '-'),
   }
 };
+
+const logAudit = async (user, action, details) => {
+  try {
+    await AuditLog.create({
+      userId: user ? user.id : undefined,
+      action,
+      details
+    });
+  } catch (err) {
+    console.error('AuditLog error:', err);
+  }
+};
+
+cron.schedule('0 0 1 * *', async () => {
+  console.log('🗑️ Monthly cleanup: removing products with all feedback ≤1');
+
+  const products = await Product.find();
+  for (const product of products) {
+    const feedbacks = await Feedback.find({ productId: product._id });
+    if (feedbacks.length > 3 && feedbacks.every(f => f.rating <= 1)) {
+      await Feedback.deleteMany({ productId: product._id });
+      await Product.findByIdAndDelete(product._id);
+      console.log(`Deleted product ${product._id}`);
+    }
+  }
+});
 
 module.exports = { typeDefs, resolvers };

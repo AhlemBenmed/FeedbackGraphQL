@@ -28,8 +28,16 @@ const feedbackSchema = new mongoose.Schema({
   date: { type: Date, default: Date.now },
 });
 
+const auditLogSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  action: String,
+  details: String,
+  timestamp: { type: Date, default: Date.now }
+});
+
 const User = mongoose.model('User', userSchema);
 const Product = mongoose.model('Product', productSchema);
 const Feedback = mongoose.model('Feedback', feedbackSchema);
+const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 
-module.exports = { User, Product, Feedback };
+module.exports = { User, Product, Feedback, AuditLog };
