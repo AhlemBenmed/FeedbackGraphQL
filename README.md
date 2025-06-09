@@ -16,9 +16,9 @@ Mise en place d’un système de feedback basé sur une API GraphQL. Cette solut
 
 ## ✨ Features
 ### 🔐 Authentication
-- User registration with email verification (token sent by styled email)
-- JWT token authentication (now loaded from `.env`)
-- Password reset functionality (token sent by styled email)
+- User registration with email verification 
+- JWT token authentication 
+- Password reset functionality 
 - Role-based authorization (Admin/User)
 - `.env` file for all secrets and credentials
 
@@ -43,7 +43,7 @@ Mise en place d’un système de feedback basé sur une API GraphQL. Cette solut
 - *Backend*: Node.js with Apollo Server
 - *Database*: MongoDB with Mongoose
 - *Authentication*: JWT with bcrypt password hashing
-- *Email Services*: Nodemailer with Gmail SMTP (credentials in `.env`)
+- *Email Services*: Nodemailer with Gmail SMTP 
 - *Scheduling*: node-cron for monthly cleanup
 - *Environment*: dotenv for config
 
@@ -51,10 +51,10 @@ Mise en place d’un système de feedback basé sur une API GraphQL. Cette solut
 
 ### 📌 Authentication Flow
 
-1. *Register*: Creates user and sends verification email (token in styled email)
+1. *Register*: Creates user and sends verification email 
 2. *Verify Email*: User verifies with token from email
 3. *Login*: Gets JWT token for authenticated requests
-4. *Password Reset*: Request email → Reset with token (token in styled email)
+4. *Password Reset*: Request email → Reset with token 
 
 ## 🚀 Getting Started
 
