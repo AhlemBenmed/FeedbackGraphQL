@@ -36,8 +36,8 @@ Mise en place d’un système de feedback basé sur une API GraphQL. Cette solut
 - Real-time rating updates
 
 ### 📝 Audit Log
-- All important actions (e.g., product creation) can be logged in the `AuditLog` collection
-- (Optional) Query audit logs (admin only)
+- All important actions (e.g., product creation, feedback addition, user registration, deletions) are logged in the `AuditLog` collection
+- Audit logs can be queried (admin only) via the `auditLogs` query
 
 ## 🛠️ Technical Stack
 - *Backend*: Node.js with Apollo Server
@@ -136,6 +136,7 @@ type AuditLog {
   userId: User
   action: String
   details: String
+  ip: String
   timestamp: String
 }
 ```
@@ -244,6 +245,7 @@ query {
     userId { id name }
     action
     details
+    ip
     timestamp
   }
 }

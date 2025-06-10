@@ -32,6 +32,7 @@ const auditLogSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   action: String,
   details: String,
+  ip: String, 
   timestamp: { type: Date, default: Date.now }
 });
 

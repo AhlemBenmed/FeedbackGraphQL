@@ -13,12 +13,14 @@ async function startServer() {
       resolvers,
       context: ({ req }) => {
         const token = req.headers.authorization || '';
+        let user = undefined;
         try {
           const decoded = jwt.verify(token.replace('Bearer ', ''), secret);
-          return { user: decoded };
-        } catch {
-          return {};
-        }
+          user = decoded;
+        } catch {}
+        // Get IP address from headers or connection
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection?.remoteAddress || undefined;
+        return { user, ip };
       }
     });
 

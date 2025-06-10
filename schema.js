@@ -57,6 +57,14 @@ const typeDefs = gql`
     user: User!
   }
 
+  type AuditLog {
+    userId: User
+    action: String
+    details: String
+    ip: String
+    timestamp: String
+  }
+
   type Query {
     products: [Product]
     product(id: ID!): Product
@@ -121,7 +129,7 @@ const resolvers = {
   },
 
   Mutation: {
-    register: async (_, { name, email, password, role }) => {
+    register: async (_, { name, email, password, role }, __, info) => {
       const existing = await User.findOne({ email });
       if (existing) throw new Error('Email already registered');
       const hashed = await bcrypt.hash(password, 10);
@@ -134,7 +142,7 @@ const resolvers = {
       await resolvers.Mutation.sendVerificationEmail(_, { email });
 
       const token = jwt.sign({ id: user._id, role: user.role }, secret, { expiresIn: '1d' });
-      await logAudit(user, 'register', `User registered with email: ${email}`);
+      await logAudit(user, 'register', `User registered with email: ${email}`, info?.ip || undefined);
       return { token, user };
     },
 
@@ -213,15 +221,15 @@ const resolvers = {
       return 'Password has been reset successfully.';
     },
 
-    addProduct: async (_, { name, description }, { user }) => {
+    addProduct: async (_, { name, description }, { user }, info) => {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
       const product = new Product({ name, description });
       await product.save();
-      await logAudit(user, 'addProduct', `Added product: ${name}`);
+      await logAudit(user, 'addProduct', `Added product: ${name}`, info?.ip || undefined);
       return product;
     },
 
-    addFeedback: async (_, { productId, rating, comment }, { user }) => {
+    addFeedback: async (_, { productId, rating, comment }, { user }, info) => {
       if (!user || user.role === 'admin') throw new Error('Unauthorized');
       if (rating < 1 || rating > 5) throw new Error('Rating must be 1-5');
       const product = await Product.findById(productId);
@@ -235,54 +243,56 @@ const resolvers = {
       });
       await feedback.save();
       await updateAverageRating(productId);
-      await logAudit(user, 'addFeedback', `Added feedback for product ${productId}: ${rating} stars`);
+      await logAudit(user, 'addFeedback', `Added feedback for product ${productId}: ${rating} stars`, info?.ip || undefined);
       return feedback;
     },
 
-    updateProduct: async (_, { id, name, description }, { user }) => {
+    updateProduct: async (_, { id, name, description }, { user }, info) => {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
+      await logAudit(user, 'updateProduct', `Updated product ${id}`, info?.ip || undefined);
       return await Product.findByIdAndUpdate(id, { name, description }, { new: true });
     },
 
-    updateFeedback: async (_, { id, rating, comment }, { user }) => {
+    updateFeedback: async (_, { id, rating, comment }, { user }, info) => {
       const feedback = await Feedback.findById(id);
       if (!feedback || feedback.userId.toString() !== user.id.toString()) throw new Error('Unauthorized');
       feedback.rating = rating ?? feedback.rating;
       feedback.comment = comment ?? feedback.comment;
       await feedback.save();
       await updateAverageRating(feedback.productId);
-      await logAudit(user, 'updateFeedback', `Updated feedback ${id} for product ${feedback.productId}`);
+      await logAudit(user, 'updateFeedback', `Updated feedback ${id} for product ${feedback.productId}`, info?.ip || undefined);
       return feedback;
     },
 
-    updateUser: async (_, { id, name, email, role }, { user }) => {
+    updateUser: async (_, { id, name, email, role }, { user, ip }) => {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
+      await logAudit(user, 'updateUser', `Updated user ${id}`, ip);
       return await User.findByIdAndUpdate(id, { name, email, role }, { new: true });
     },
 
-    deleteProduct: async (_, { id }, { user }) => {
+    deleteProduct: async (_, { id }, { user, ip }) => {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
       await Product.findByIdAndDelete(id);
       await Feedback.deleteMany({ productId: id });
-      await logAudit(user, 'deleteProduct', `Deleted product ${id}`);
+      await logAudit(user, 'deleteProduct', `Deleted product ${id}`, ip);
       return true;
     },
 
-    deleteFeedback: async (_, { id }, { user }) => {
+    deleteFeedback: async (_, { id }, { user, ip }) => {
       const feedback = await Feedback.findById(id);
       if (!feedback || (user.role !== 'admin' && feedback.userId.toString() !== user.id.toString()))
         throw new Error('Unauthorized');
       await Feedback.findByIdAndDelete(id);
       await updateAverageRating(feedback.productId);
-      await logAudit(user, 'deleteFeedback', `Deleted feedback ${id} for product ${feedback.productId}`);
+      await logAudit(user, 'deleteFeedback', `Deleted feedback ${id} for product ${feedback.productId}`, ip);
       return true;
     },
 
-    deleteUser: async (_, { id }, { user }) => {
+    deleteUser: async (_, { id }, { user, ip }) => {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
       await User.findByIdAndDelete(id);
       await Feedback.deleteMany({ userId: id });
-      await logAudit(user, 'deleteUser', `Deleted user ${id}`);
+      await logAudit(user, 'deleteUser', `Deleted user ${id}`, ip);
       return true;
     }
   },
@@ -299,12 +309,13 @@ const resolvers = {
   }
 };
 
-const logAudit = async (user, action, details) => {
+const logAudit = async (user, action, details, ip) => {
   try {
     await AuditLog.create({
       userId: user ? user.id : undefined,
       action,
-      details
+      details,
+      ip
     });
   } catch (err) {
     console.error('AuditLog error:', err);
