@@ -134,6 +134,7 @@ const resolvers = {
       await resolvers.Mutation.sendVerificationEmail(_, { email });
 
       const token = jwt.sign({ id: user._id, role: user.role }, secret, { expiresIn: '1d' });
+      await logAudit(user, 'register', `User registered with email: ${email}`);
       return { token, user };
     },
 
@@ -216,7 +217,7 @@ const resolvers = {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
       const product = new Product({ name, description });
       await product.save();
-      // await logAudit(user, 'addProduct', `Added product: ${name}`);
+      await logAudit(user, 'addProduct', `Added product: ${name}`);
       return product;
     },
 
@@ -234,6 +235,7 @@ const resolvers = {
       });
       await feedback.save();
       await updateAverageRating(productId);
+      await logAudit(user, 'addFeedback', `Added feedback for product ${productId}: ${rating} stars`);
       return feedback;
     },
 
@@ -249,6 +251,7 @@ const resolvers = {
       feedback.comment = comment ?? feedback.comment;
       await feedback.save();
       await updateAverageRating(feedback.productId);
+      await logAudit(user, 'updateFeedback', `Updated feedback ${id} for product ${feedback.productId}`);
       return feedback;
     },
 
@@ -260,6 +263,8 @@ const resolvers = {
     deleteProduct: async (_, { id }, { user }) => {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
       await Product.findByIdAndDelete(id);
+      await Feedback.deleteMany({ productId: id });
+      await logAudit(user, 'deleteProduct', `Deleted product ${id}`);
       return true;
     },
 
@@ -269,12 +274,15 @@ const resolvers = {
         throw new Error('Unauthorized');
       await Feedback.findByIdAndDelete(id);
       await updateAverageRating(feedback.productId);
+      await logAudit(user, 'deleteFeedback', `Deleted feedback ${id} for product ${feedback.productId}`);
       return true;
     },
 
     deleteUser: async (_, { id }, { user }) => {
       if (!user || user.role !== 'admin') throw new Error('Unauthorized');
       await User.findByIdAndDelete(id);
+      await Feedback.deleteMany({ userId: id });
+      await logAudit(user, 'deleteUser', `Deleted user ${id}`);
       return true;
     }
   },
@@ -312,6 +320,7 @@ cron.schedule('0 0 1 * *', async () => {
     if (feedbacks.length > 3 && feedbacks.every(f => f.rating <= 1)) {
       await Feedback.deleteMany({ productId: product._id });
       await Product.findByIdAndDelete(product._id);
+      await logAudit(null, 'monthlyCleanup', `Deleted product ${product._id} with all feedback ≤1`);
       console.log(`Deleted product ${product._id}`);
     }
   }
