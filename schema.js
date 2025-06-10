@@ -77,6 +77,7 @@ const typeDefs = gql`
     productByRating(rating: Float!): [Product]
     bestProducts: [Product]
     me: User
+    auditLogs: [AuditLog]
   }
 
   type Mutation {
@@ -125,6 +126,10 @@ const resolvers = {
     me: async (_, __, { user }) => {
       if (!user) throw new Error('Unauthorized');
       return await User.findById(user.id);
+    },
+    auditLogs: async (_, __, { user }) => {
+      if (!user || user.role !== 'admin') throw new Error('Unauthorized');
+      return await AuditLog.find().populate('userId');
     }
   },
 
@@ -315,7 +320,8 @@ const logAudit = async (user, action, details, ip) => {
       userId: user ? user.id : undefined,
       action,
       details,
-      ip
+      ip: ip || 'unknown',
+      timestamp: new Date().toISOString()
     });
   } catch (err) {
     console.error('AuditLog error:', err);
@@ -331,7 +337,7 @@ cron.schedule('0 0 1 * *', async () => {
     if (feedbacks.length > 3 && feedbacks.every(f => f.rating <= 1)) {
       await Feedback.deleteMany({ productId: product._id });
       await Product.findByIdAndDelete(product._id);
-      await logAudit(null, 'monthlyCleanup', `Deleted product ${product._id} with all feedback ≤1`);
+      await logAudit(null, 'monthlyCleanup', `Deleted product ${product._id} with all feedback ≤1`, 'system');
       console.log(`Deleted product ${product._id}`);
     }
   }

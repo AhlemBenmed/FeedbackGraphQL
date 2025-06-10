@@ -19,7 +19,11 @@ async function startServer() {
           user = decoded;
         } catch {}
         // Get IP address from headers or connection
-        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection?.remoteAddress || undefined;
+        const ip =
+          req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+          req.connection?.remoteAddress ||
+          req.socket?.remoteAddress ||
+          undefined;
         return { user, ip };
       }
     });
